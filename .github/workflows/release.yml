@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build release zip
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          STAGE="calcsx_exporter-${VERSION}"
+          mkdir -p "dist/${STAGE}"
+          cp -R calcsx_exporter "dist/${STAGE}/"
+          cp install/install-macos.command "dist/${STAGE}/"
+          cp install/install-windows.bat   "dist/${STAGE}/"
+          cp install/INSTALL.txt           "dist/${STAGE}/"
+          chmod +x "dist/${STAGE}/install-macos.command"
+          (cd dist && zip -r "${STAGE}.zip" "${STAGE}")
+          ls -la dist/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true

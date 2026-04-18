@@ -1,0 +1,35 @@
+CalcSX Bobbin Exporter for Fusion 360
+======================================
+
+QUICK INSTALL
+-------------
+
+macOS:
+  Double-click  install-macos.command
+  (If macOS blocks it: right-click > Open, then confirm.)
+
+Windows:
+  Double-click  install-windows.bat
+
+After install, restart Fusion 360 and find the script under:
+  UTILITIES > Scripts and Add-Ins > My Scripts > calcsx_exporter
+
+
+MANUAL INSTALL
+--------------
+
+1. Copy the 'calcsx_exporter' folder into Fusion 360's Scripts directory:
+
+   macOS:    ~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Scripts/
+   Windows:  %APPDATA%\Autodesk\Autodesk Fusion 360\API\Scripts\
+
+2. Restart Fusion 360.
+
+3. Open UTILITIES > Scripts and Add-Ins > My Scripts.
+   The script appears as 'calcsx_exporter'.
+
+
+USAGE
+-----
+
+See README in the project repository for full usage instructions.
