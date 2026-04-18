@@ -99,7 +99,13 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-The resulting `calcsx_exporter-v1.0.0.zip` is attached to the GitHub Release and is what CalcSX's "Download Fusion 360 exporter" link should point at (`/releases/latest`).
+A version-agnostic `calcsx_exporter.zip` is attached to the release. CalcSX's "Download Fusion 360 exporter" link should point at:
+
+```
+https://github.com/<owner>/<repo>/releases/latest/download/calcsx_exporter.zip
+```
+
+Because the asset filename does not change between releases, that URL always serves the newest installer with no code change in CalcSX. The version is preserved inside the zip — extracting it produces a `calcsx_exporter-vX.Y.Z/` folder so users can tell which release they have locally.
 
 ## Requirements
 

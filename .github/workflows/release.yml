@@ -20,13 +20,14 @@ jobs:
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME}"
           STAGE="calcsx_exporter-${VERSION}"
+          ASSET="calcsx_exporter.zip"
           mkdir -p "dist/${STAGE}"
           cp -R calcsx_exporter "dist/${STAGE}/"
           cp install/install-macos.command "dist/${STAGE}/"
           cp install/install-windows.bat   "dist/${STAGE}/"
           cp install/INSTALL.txt           "dist/${STAGE}/"
           chmod +x "dist/${STAGE}/install-macos.command"
-          (cd dist && zip -r "${STAGE}.zip" "${STAGE}")
+          (cd dist && zip -r "${ASSET}" "${STAGE}")
           ls -la dist/
 
       - name: Publish GitHub Release
