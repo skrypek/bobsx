@@ -272,18 +272,8 @@ def _build_channels(faces, n_pts):
         tag = "WIDE" if i in set(wide) else "narrow"
         dbg.append(f"  f{i}: cw={cws[i]:.4f} along={infos[i]['along']} [{tag}]")
 
-    # All faces same type → one channel per face
-    if not wide or not narrow:
-        channels = []
-        for i in range(len(faces)):
-            p, n = _sample(faces[i], infos[i], _cross_mid(infos[i]), n_pts)
-            if len(p) >= 3:
-                channels.append((p, n))
-        dbg.append(f"No narrow/wide mix → {len(channels)} channels")
-        ui.messageBox('\n'.join(dbg), 'CalcSX Export')
-        return channels
-
-    # ── 2. Face adjacency ────────────────────────────────────────
+    # ── 2. Face adjacency (B-rep edge sharing) ───────────────────
+    # Always built: downstream wide-face merging uses face_adj.
     esets = [_edge_ids(f) for f in faces]
     face_adj = {i: set() for i in range(len(faces))}
     for a in range(len(faces)):
@@ -293,28 +283,92 @@ def _build_channels(faces, n_pts):
                 face_adj[b].add(a)
 
     # ── 3. BFS-group narrow faces into chains ────────────────────
-    # Gate: only merge through SHORT shared edges (sequential faces
-    # of the same groove).  Long edges connect adjacent grooves.
-    visited = set()
-    chains = []
-    for s in narrow:
-        if s in visited:
-            continue
-        comp, q = [], [s]
-        while q:
-            nd = q.pop(0)
-            if nd in visited:
+    # Two strategies depending on whether the model has wide
+    # transition faces:
+    #
+    #   • WIDE-FACE present → use B-rep shared-edge adjacency with a
+    #     short-edge gate (`shared < min_cw × 2.5`).  Wide faces
+    #     already carry groove transitions, and the edge topology is
+    #     reliable because the user has to select them too.
+    #
+    #   • NO WIDE FACE    → use centerline-endpoint proximity.
+    #     Grooves pre-defined as disjoint CAD sweeps typically omit
+    #     corner fillets from selection, so straight segments are
+    #     not edge-adjacent in the B-rep even though their endpoints
+    #     coincide in 3D.
+    if wide:
+        dbg.append("Chain strategy: B-rep shared edges (wide faces present)")
+        visited = set()
+        chains = []
+        for s in narrow:
+            if s in visited:
                 continue
-            visited.add(nd)
-            comp.append(nd)
-            for nb in face_adj[nd]:
-                if nb not in narrow_set or nb in visited:
+            comp, q = [], [s]
+            while q:
+                nd = q.pop(0)
+                if nd in visited:
                     continue
-                shared = _shared_edge_objs(faces[nd], faces[nb])
-                total_len = sum(e.length for e in shared)
-                if total_len < min_cw * 2.5:
+                visited.add(nd)
+                comp.append(nd)
+                for nb in face_adj[nd]:
+                    if nb not in narrow_set or nb in visited:
+                        continue
+                    shared = _shared_edge_objs(faces[nd], faces[nb])
+                    total_len = sum(e.length for e in shared)
+                    if total_len < min_cw * 2.5:
+                        q.append(nb)
+            chains.append(comp)
+    else:
+        dbg.append("Chain strategy: centerline-endpoint proximity (no wide faces)")
+        face_eps = {}
+        for i in narrow:
+            pts, _ = _sample(faces[i], infos[i], _cross_mid(infos[i]), 5)
+            if len(pts) >= 2:
+                face_eps[i] = (pts[0], pts[-1])
+
+        prox_thresh = max(min_cw * 0.5, 1e-3)
+
+        def _face_endpoint_dist(a, b):
+            if a not in face_eps or b not in face_eps:
+                return float('inf')
+            ea, eb = face_eps[a], face_eps[b]
+            return min(_dist3d(ea[0], eb[0]), _dist3d(ea[0], eb[1]),
+                       _dist3d(ea[1], eb[0]), _dist3d(ea[1], eb[1]))
+
+        prox_adj = {i: [] for i in narrow}
+        for i_idx, a in enumerate(narrow):
+            for b in narrow[i_idx+1:]:
+                d = _face_endpoint_dist(a, b)
+                if d < prox_thresh:
+                    prox_adj[a].append((b, d))
+                    prox_adj[b].append((a, d))
+
+        dbg.append(f"Proximity threshold: {prox_thresh:.4f}")
+        dbg.append("Endpoint adjacency:")
+        for a in narrow:
+            if not prox_adj[a]:
+                dbg.append(f"  f{a}: (no junctions)")
+                continue
+            parts = [f"f{b}={d:.4f}" for b, d in sorted(prox_adj[a])]
+            dbg.append(f"  f{a}→ {', '.join(parts)}")
+
+        visited = set()
+        chains = []
+        for s in narrow:
+            if s in visited:
+                continue
+            comp, q = [], [s]
+            while q:
+                nd = q.pop(0)
+                if nd in visited:
+                    continue
+                visited.add(nd)
+                comp.append(nd)
+                for nb, _d in prox_adj[nd]:
+                    if nb in visited:
+                        continue
                     q.append(nb)
-        chains.append(comp)
+            chains.append(comp)
 
     dbg.append(f"{len(chains)} narrow chains:")
     for ci, ch in enumerate(chains):
@@ -512,13 +566,31 @@ def _build_channels(faces, n_pts):
     # ── 5. Collect segments (narrow + wide strips) ───────────────
     groove_segments = [[] for _ in range(n_grooves)]
 
+    # One global target step keeps the rectangle size uniform across
+    # EVERY segment — narrow faces AND wide strips alike — so a short
+    # face gets proportionally fewer points instead of the same n_pts
+    # crammed into a tiny length.  n_pts is the resolution of the
+    # LONGEST selected face; every other face/strip is sampled at that
+    # same physical step.  Non-uniform spacing makes CalcSX read the
+    # density jump at a face boundary as a coil break and makes
+    # Biot-Savart over-weight the finer mesh on the short segment.
+    max_al = max((info['al'] for info in infos), default=0.0)
+    step = (max_al / n_pts) if (max_al > 0 and n_pts > 0) else 0.0
+    dbg.append(f"Global sample step: {step:.5f} "
+               f"(longest along-len {max_al:.4f}, n_pts {n_pts})")
+
+    def _n_for(info):
+        if step <= 0:
+            return n_pts
+        return max(3, int(round(info['al'] / step)))
+
     # Narrow segments
     for gi, groove_chains in enumerate(grooves):
         for ci in groove_chains:
             ordered = _order_faces(faces, infos, chains[ci])
             for fi in ordered:
                 p, n = _sample(faces[fi], infos[fi],
-                               _cross_mid(infos[fi]), n_pts)
+                               _cross_mid(infos[fi]), _n_for(infos[fi]))
                 if len(p) >= 3:
                     groove_segments[gi].append((p, n, fi))
 
@@ -543,7 +615,7 @@ def _build_channels(faces, n_pts):
                 continue
             used_cvs.add(cv_key)
 
-            strip_p, strip_n = _sample(faces[wi], w_info, cv, n_pts)
+            strip_p, strip_n = _sample(faces[wi], w_info, cv, _n_for(w_info))
             if len(strip_p) >= 3:
                 groove_segments[gi].append((strip_p, strip_n, wi))
                 dbg.append(f"  groove {gi} strip on wide f{wi}: "
