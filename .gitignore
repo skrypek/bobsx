@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Editor / IDE
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+
+# Exporter debug output
+*_debug_ch0.csv
